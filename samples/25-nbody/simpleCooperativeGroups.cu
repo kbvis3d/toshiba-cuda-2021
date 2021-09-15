@@ -78,9 +78,11 @@ __global__ void bodyForce(Body* p, float dt, int n) {
     p[i].vxyz.x += dt * Fx; p[i].vxyz.y += dt * Fy; p[i].vxyz.z += dt * Fz;
 }
 
+#define UNROLLED_TILED_REDUCTION
+
 void main(const int argc, const char** argv) {
 
-    const int nBodies = 2 << 11;
+    const int nBodies = 2 << 15;
     const float dt = 0.01f; // Time step
     const int nIters = 10;  // Simulation iterations
 
@@ -95,17 +97,20 @@ void main(const int argc, const char** argv) {
     //read_values_from_file(initialized_values, buf, bytes);
 
     // migrate unified memory to device (if cudaMemPrefetchAsync available for your GPU)
-    int deviceId;
-    cudaGetDevice(&deviceId);
-    cudaMemPrefetchAsync(p, bytes, deviceId);
+    //int deviceId;
+    //cudaGetDevice(&deviceId);
+    //cudaMemPrefetchAsync(p, bytes, deviceId);
 
     size_t threadsPerBlock = 1024;
-    size_t numberOfBlocks = nBodies / threadsPerBlock;
+    size_t numberOfBlocks = (nBodies + threadsPerBlock - 1) / threadsPerBlock;
 
     for (int iter = 0; iter < nIters; iter++) {
 
+#if defined(UNROLLED_TILED_REDUCTION)
+        bodyForce_tile_shfl<<<nBodies, threadsPerBlock>>>(p, dt); // outer and inner loops unrolled
+#else
         bodyForce<<<numberOfBlocks, threadsPerBlock>>>(p, dt, nBodies); // outer loop unrolled
-        //bodyForce_tile_shfl<<<numberOfBlocks, threadsPerBlock>>>(p, dt); // outer and inner loops unrolled
+#endif
 
         integratePositions<<<numberOfBlocks, threadsPerBlock>>>(p, dt);
 
